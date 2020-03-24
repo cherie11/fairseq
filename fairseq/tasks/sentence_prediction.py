@@ -57,6 +57,10 @@ class SentencePredictionTask(FairseqTask):
                             help='truncate sequence to max-positions')
         parser.add_argument('--add-prev-output-tokens', action='store_true', default=False,
                             help='add prev_output_tokens to sample, used for encoder-decoder arch')
+        parser.add_argument('--max-source-positions', default=1024, type=int, metavar='N',
+                            help='max number of tokens in the source sequence')
+        parser.add_argument('--max-target-positions', default=1024, type=int, metavar='N',
+                            help='max number of tokens in the target sequence')
 
     def __init__(self, args, data_dictionary, label_dictionary):
         super().__init__(args)

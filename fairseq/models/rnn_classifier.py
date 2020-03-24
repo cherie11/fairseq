@@ -16,8 +16,27 @@ def load_pretrained_embedding_from_file(embed_path, dictionary, embed_dim):
     embed_dict = utils.parse_embedding(embed_path)
     utils.print_embed_overlap(embed_dict, dictionary)
     return utils.load_embedding(embed_dict, dictionary, embed_tokens)
+DEFAULT_MAX_SOURCE_POSITIONS = 1e5
+DEFAULT_MAX_TARGET_POSITIONS = 1e5
+class RNNClassificationHead(nn.Module):
+    """Head for sentence-level classification tasks."""
 
-    
+    def __init__(self, input_dim, inner_dim, num_classes, activation_fn, pooler_dropout):
+        super().__init__()
+        self.dense = nn.Linear(input_dim, inner_dim)
+        self.activation_fn = utils.get_activation_fn(activation_fn)
+        self.dropout = nn.Dropout(p=pooler_dropout)
+        self.out_proj = nn.Linear(inner_dim, num_classes)
+
+    def forward(self, features, **kwargs):
+        x = features[:, 0, :]  # take <s> token (equiv. to [CLS])
+        x = self.dropout(x)
+        x = self.dense(x)
+        x = self.activation_fn(x)
+        x = self.dropout(x)
+        x = self.out_proj(x)
+        return x
+
 @register_model('rnn_classifier')
 class FairseqRNNClassifier(BaseFairseqModel):
 
@@ -47,6 +66,8 @@ class FairseqRNNClassifier(BaseFairseqModel):
         # function. This provides more flexibility, since the returned model
         # instance can be of a different type than the one that was called.
         # In this case we'll just return a FairseqRNNClassifier instance.
+        max_source_positions = getattr(args, 'max_source_positions', DEFAULT_MAX_SOURCE_POSITIONS)
+        max_target_positions = getattr(args, 'max_target_positions', DEFAULT_MAX_TARGET_POSITIONS)
 
         # Initialize our RNN module        
         if args.encoder_embed_path:
@@ -70,7 +91,7 @@ class FairseqRNNClassifier(BaseFairseqModel):
             bidirectional=True,
             pretrained_embed=pretrained_encoder_embed,
         )
-        output_size = len(task.target_dictionary)
+        output_size = 25
         last_hidden = nn.Linear(args.hidden_dim*2*args.encoder_layers, output_size)
         # Return the wrapped version of the module
         return FairseqRNNClassifier(
@@ -79,20 +100,22 @@ class FairseqRNNClassifier(BaseFairseqModel):
             input_vocab=task.source_dictionary,
         )
 
-    def __init__(self, rnn, input_vocab,last_hidden):
+    def __init__(self, rnn, input_vocab,last_hidden,**kwargs):
         super(FairseqRNNClassifier, self).__init__()
         self.softmax = nn.LogSoftmax(dim=1)
         self.last_hidden = last_hidden
         self.rnn = rnn
         self.input_vocab = input_vocab
-
+        self.classification_heads=dict()
+        self.classification_heads['sentence_classification_head']=1
         # The RNN module in the tutorial expects one-hot inputs, so we can
         # precompute the identity matrix to help convert from indices to
         # one-hot vectors. We register it as a buffer so that it is moved to
         # the GPU when ``cuda()`` is called.
         self.register_buffer('one_hot_inputs', torch.eye(len(input_vocab)))
-
-    def forward(self, src_tokens, src_lengths):
+    def register_classification_head(self, name, num_classes=None, inner_dim=None, **kwargs):
+        pass
+    def forward(self, src_tokens, src_lengths,*args,**kwargs):
         # The inputs to the ``forward()`` function are determined by the
         # Task, and in particular the ``'net_input'`` key in each
         # mini-batch. We'll define the Task in the next section, but for
@@ -103,9 +126,9 @@ class FairseqRNNClassifier(BaseFairseqModel):
         final_hiddens = torch.reshape(final_hiddens,(final_hiddens.size()[1],-1))
        
         output = self.last_hidden(final_hiddens)
-        output = self.softmax(output)
+        # output = self.softmax(output)
         # Return the final output state for making a prediction
-        return output
+        return output,1
     def max_decoder_positions(self):
         """Maximum length supported by the decoder."""
         return 2

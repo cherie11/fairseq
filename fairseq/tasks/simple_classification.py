@@ -14,8 +14,10 @@ class SimpleClassificationTask(FairseqTask):
         # located and the maximum supported input length.
         parser.add_argument('data', metavar='FILE',
                             help='file prefix for data')
-        parser.add_argument('--max-positions', default=1024, type=int,
+        parser.add_argument('--max-source-positions', default=1024, type=int,
                             help='max input length')
+        parser.add_argument('--max-target-positions', default=1024, type=int,
+                            help='max out length')
 
     @classmethod
     def setup_task(cls, args, **kwargs):
