@@ -18,16 +18,22 @@ class CountingIterator(object):
 
     Args:
         iterable (iterable): iterable to wrap
+        start (int): starting iteration count
+        override_len (int): override the iterator length
+            returned by ``__len__``
 
     Attributes:
         count (int): number of elements consumed from this iterator
     """
 
-    def __init__(self, iterable, start=0):
+    def __init__(self, iterable, start=0, override_len=None):
         self.iterable = iterable
         self.count = start
         self.itr = iter(self)
-        self.len = start + len(iterable)
+        if override_len is None:
+            self.len = start + len(iterable)
+        else:
+            self.len = override_len
 
     def __len__(self):
         return self.len
@@ -62,6 +68,10 @@ class EpochBatchIterating(object):
     def __len__(self) -> int:
         raise NotImplementedError
 
+    @property
+    def next_epoch_idx(self):
+        raise NotImplementedError
+
     def next_epoch_itr(self, shuffle=True, fix_batches_to_gpus=False):
         """Return a new iterator over the dataset.
 
@@ -94,17 +104,25 @@ class EpochBatchIterating(object):
 
 class StreamingEpochBatchIterator(EpochBatchIterating):
     def __init__(
-        self, dataset, epoch=0, num_shards=1, shard_id=0,
+        self, dataset, epoch=1, num_shards=1, shard_id=0,
     ):
         assert isinstance(dataset, torch.utils.data.IterableDataset)
         self.dataset = dataset
-        self.epoch = epoch
+        self.epoch = max(epoch, 1)  # we use 1-based indexing for epochs
         self._current_epoch_iterator = None
         self.num_shards = num_shards
         self.shard_id = shard_id
 
+    @property
+    def next_epoch_idx(self):
+        """Return the epoch index after *next_epoch_itr* is called."""
+        if self._current_epoch_iterator is not None and self.end_of_epoch():
+            return self.epoch + 1
+        else:
+            return self.epoch
+
     def next_epoch_itr(self, shuffle=True, fix_batches_to_gpus=False):
-        self.epoch += 1
+        self.epoch = self.next_epoch_idx
         self.dataset.set_epoch(self.epoch)
         self._current_epoch_iterator = CountingIterator(
             iterable=ShardedIterator(
@@ -159,12 +177,12 @@ class EpochBatchIterator(EpochBatchIterating):
             loading. 0 means the data will be loaded in the main process
             (default: 0).
         epoch (int, optional): the epoch to start the iterator from
-            (default: 0).
+            (default: 1).
     """
 
     def __init__(
         self, dataset, collate_fn, batch_sampler, seed=1, num_shards=1, shard_id=0,
-        num_workers=0, epoch=0,
+        num_workers=0, epoch=1,
     ):
         assert isinstance(dataset, torch.utils.data.Dataset)
         self.dataset = dataset
@@ -175,13 +193,24 @@ class EpochBatchIterator(EpochBatchIterating):
         self.shard_id = shard_id
         self.num_workers = num_workers
 
-        self.epoch = epoch
+        self.epoch = max(epoch, 1)  # we use 1-based indexing for epochs
+        self.shuffle = True
         self._cur_epoch_itr = None
         self._next_epoch_itr = None
         self._supports_prefetch = getattr(dataset, 'supports_prefetch', False)
 
     def __len__(self):
         return len(self.frozen_batches)
+
+    @property
+    def next_epoch_idx(self):
+        """Return the epoch index after *next_epoch_itr* is called."""
+        if self._next_epoch_itr is not None:
+            return self.epoch
+        elif self._cur_epoch_itr is not None and self.end_of_epoch():
+            return self.epoch + 1
+        else:
+            return self.epoch
 
     def next_epoch_itr(self, shuffle=True, fix_batches_to_gpus=False):
         """Return a new iterator over the dataset.
@@ -193,15 +222,16 @@ class EpochBatchIterator(EpochBatchIterating):
                 allocated to the same shards across epochs. Requires
                 that :attr:`dataset` supports prefetching (default: False).
         """
+        self.epoch = self.next_epoch_idx
         if self._next_epoch_itr is not None:
             self._cur_epoch_itr = self._next_epoch_itr
             self._next_epoch_itr = None
         else:
-            self.epoch += 1
             self._cur_epoch_itr = self._get_iterator_for_epoch(
                 self.epoch, shuffle, fix_batches_to_gpus=fix_batches_to_gpus,
             )
         self.dataset.set_epoch(self.epoch)
+        self.shuffle = shuffle
         return self._cur_epoch_itr
 
     def end_of_epoch(self) -> bool:
@@ -222,6 +252,7 @@ class EpochBatchIterator(EpochBatchIterating):
         return {
             'epoch': self.epoch,
             'iterations_in_epoch': self.iterations_in_epoch,
+            'shuffle': self.shuffle,
         }
 
     def load_state_dict(self, state_dict):
@@ -235,12 +266,13 @@ class EpochBatchIterator(EpochBatchIterating):
                 shuffle=state_dict.get('shuffle', True),
                 offset=itr_pos,
             )
+            if self._next_epoch_itr is None:
+                # we finished the epoch, increment epoch counter
+                self.epoch += 1
 
     def _get_iterator_for_epoch(self, epoch, shuffle, fix_batches_to_gpus=False, offset=0):
 
         def shuffle_batches(batches, seed):
-            # set seed based on the seed and epoch number so that we get
-            # reproducible results when resuming from checkpoints
             with data_utils.numpy_seed(seed):
                 np.random.shuffle(batches)
             return batches

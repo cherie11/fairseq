@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import logging
 import os
 
 from fairseq.data import (
@@ -14,9 +15,12 @@ from fairseq.data import (
     StripTokenDataset,
     TokenBlockDataset,
 )
-
 from fairseq.data.encoders.utils import get_whole_word_mask
-from . import FairseqTask, register_task
+from fairseq.tasks import FairseqTask, register_task
+from fairseq import utils
+
+
+logger = logging.getLogger(__name__)
 
 
 @register_task('denoising')
@@ -32,8 +36,6 @@ class DenoisingTask(FairseqTask):
         parser.add_argument('--tokens-per-sample', default=512, type=int,
                             help='max number of total tokens over all segments'
                                  ' per sample for dataset')
-        parser.add_argument('--raw-text', default=False, action='store_true',
-                            help='load raw text dataset')
         parser.add_argument(
             '--sample-break-mode', default="complete_doc", type=str,
             help='mode for breaking sentence',
@@ -68,12 +70,20 @@ class DenoisingTask(FairseqTask):
         )
         parser.add_argument(
             '--mask-length', default="subword", type=str,
-            choices=['subword', 'word', 'span-possion'],
+            choices=['subword', 'word', 'span-poisson'],
             help='mask length to choose'
         )
         parser.add_argument(
             '--replace-length', default=-1, type=int,
             help='when masking N tokens, replace with 0, 1, or N tokens (use -1 for N)'
+        )
+        parser.add_argument(
+            '--max-source-positions', default=1024, type=int, metavar='N',
+            help='max number of tokens in the source sequence'
+        )
+        parser.add_argument(
+            '--max-target-positions', default=1024, type=int, metavar='N',
+            help='max number of tokens in the target sequence'
         )
 
     def __init__(self, args, dictionary):
@@ -89,21 +99,20 @@ class DenoisingTask(FairseqTask):
         """Setup the task.
         """
         dictionary = Dictionary.load(os.path.join(args.data, 'dict.txt'))
-        print('| dictionary: {} types'.format(len(dictionary)))
+        logger.info('dictionary: {} types'.format(len(dictionary)))
         if not hasattr(args, 'shuffle_instance'):
             args.shuffle_instance = False
         return cls(args, dictionary)
 
-    def load_dataset(self, split, epoch=0, combine=False):
+    def load_dataset(self, split, epoch=1, combine=False, **kwargs):
         """Load a given dataset split.
 
         Args:
             split (str): name of the split (e.g., train, valid, test)
         """
-
-        paths = self.args.data.split(':')
+        paths = utils.split_paths(self.args.data)
         assert len(paths) > 0
-        data_path = paths[epoch % len(paths)]
+        data_path = paths[(epoch - 1) % len(paths)]
         split_path = os.path.join(data_path, split)
 
         dataset = data_utils.load_indexed_dataset(
@@ -140,8 +149,8 @@ class DenoisingTask(FairseqTask):
             mask_whole_words, shuffle=self.args.shuffle_instance,
             seed=self.seed, args=self.args
         )
-        print(
-            "| Split: {0}, Loaded {1} samples of denoising_dataset".format(
+        logger.info(
+            "Split: {0}, Loaded {1} samples of denoising_dataset".format(
                 split,
                 len(self.datasets[split]),
             )

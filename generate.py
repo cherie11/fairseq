@@ -11,21 +11,28 @@ import torch
 
 from fairseq import bleu, checkpoint_utils, options, progress_bar, tasks, utils
 from fairseq.meters import StopwatchMeter, TimeMeter
-
-
+import logging
+logging.basicConfig(level=logging.INFO)
 def main(args):
     assert args.path is not None, '--path required for generation!'
     assert not args.sampling or args.nbest == args.beam, \
         '--sampling requires --nbest to be equal to --beam'
     assert args.replace_unk is None or args.raw_text, \
         '--replace-unk requires a raw text dataset (--raw-text)'
-
+    
     utils.import_user_module(args)
 
     if args.max_tokens is None and args.max_sentences is None:
         args.max_tokens = 12000
-    print(args)
+    logging.info(args)
 
+    f1=open(args.out,'w')
+    f2=open(args.tgt,'w')
+    f3=open(args.src,'w')
+    f4=open(args.scr,'w')
+    
+    
+    
     use_cuda = torch.cuda.is_available() and not args.cpu
 
     # Load dataset splits
@@ -40,7 +47,7 @@ def main(args):
     tgt_dict = task.target_dictionary
 
     # Load ensemble
-    print('| loading model(s) from {}'.format(args.path))
+    logging.info('| loading model(s) from {}'.format(args.path))
     models, _model_args = checkpoint_utils.load_model_ensemble(
         args.path.split(':'),
         arg_overrides=eval(args.model_overrides),
@@ -128,9 +135,11 @@ def main(args):
 
                 if not args.quiet:
                     if src_dict is not None:
-                        print('S-{}\t{}'.format(sample_id, src_str))
+                        f3.write(src_str+'\n')
+#                         print('S-{}\t{}'.format(sample_id, src_str))
                     if has_target:
-                        print('T-{}\t{}'.format(sample_id, target_str))
+                        f2.write(target_str+'\n')
+#                         print('T-{}\t{}'.format(sample_id, target_str))
 
                 # Process top predictions
                 for j, hypo in enumerate(hypos[i][:args.nbest]):
@@ -144,14 +153,25 @@ def main(args):
                     )
 
                     if not args.quiet:
-                        print('H-{}\t{}\t{}'.format(sample_id, hypo['score'], hypo_str))
-                        print('P-{}\t{}'.format(
-                            sample_id,
-                            ' '.join(map(
-                                lambda x: '{:.4f}'.format(x),
-                                hypo['positional_scores'].tolist(),
-                            ))
-                        ))
+#                         f1.write('H-{}\t{}\t{}\n'.format(sample_id, hypo['score'], hypo_str))
+#                         f2.write('P-{}\t{}\n'.format(
+#                             sample_id,
+#                             ' '.join(map(
+#                                 lambda x: '{:.4f}'.format(x),
+#                                 hypo['positional_scores'].tolist(),
+#                             ))
+#                         ))
+#                         f1.write('H-{}\t{}\n'.format(sample_id, hypo_str))
+                        f4.write(str(hypo['score'])+'\n')
+                        f1.write(hypo_str+'\n')
+    
+#                         f2.write('P-{}\t{}\n'.format(
+#                             sample_id,
+#                             ' '.join(map(
+#                                 lambda x: '{:.4f}'.format(x),
+#                                 hypo['positional_scores'].tolist(),
+#                             ))
+#                         ))
 
                         if args.print_alignment:
                             print('A-{}\t{}'.format(
@@ -161,15 +181,6 @@ def main(args):
 
                         if args.print_step:
                             print('I-{}\t{}'.format(sample_id, hypo['steps']))
-
-                        if getattr(args, 'retain_iter_history', False):
-                            print("\n".join([
-                                    'E-{}_{}\t{}'.format(
-                                        sample_id, step,
-                                        utils.post_process_prediction(
-                                            h['tokens'].int().cpu(),
-                                            src_str, None, None, tgt_dict, None)[1])
-                                        for step, h in enumerate(hypo['history'])]))
 
                     # Score only the top hypothesis
                     if has_target and j == 0:
@@ -185,17 +196,31 @@ def main(args):
             t.log({'wps': round(wps_meter.avg)})
             num_sentences += sample['nsentences']
 
-    print('| Translated {} sentences ({} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)'.format(
+    logging.info('| Translated {} sentences ({} tokens) in {:.1f}s ({:.2f} sentences/s, {:.2f} tokens/s)'.format(
         num_sentences, gen_timer.n, gen_timer.sum, num_sentences / gen_timer.sum, 1. / gen_timer.avg))
     if has_target:
-        print('| Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, scorer.result_string()))
-
+        logging.info('| Generate {} with beam={}: {}'.format(args.gen_subset, args.beam, scorer.result_string()))
+    f1.close()
+    f2.close()
+    f3.close()
+    f4.close
+    
     return scorer
 
 
 def cli_main():
     parser = options.get_generation_parser()
+    parser.add_argument('--out', default=None, type=str, 
+                       help='out txt file')
+    parser.add_argument('--tgt', default=None, type=str, 
+                       help='tgt txt file')
+    parser.add_argument('--src', default=None, type=str, 
+                       help='src txt file')
+    parser.add_argument('--scr', default=None, type=str, 
+                        help='score txt file')
+    
     args = options.parse_args_and_arch(parser)
+    
     main(args)
 
 
