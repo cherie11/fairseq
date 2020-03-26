@@ -110,7 +110,9 @@ class SentencePredictionTask(FairseqTask):
         else:
             label_dict = data_dict
         return SentencePredictionTask(args, data_dict, label_dict)
-
+#     def build_dataset_for_inference(self, src_tokens, src_lengths):
+#         return RightPadDataset(src_tokens, src_lengths,pad_idx=self.source_dictionary.pad())
+                
     def load_dataset(self, split, combine=False, **kwargs):
         """Load a given dataset split (e.g., train, valid, test)."""
         def get_path(type, split):

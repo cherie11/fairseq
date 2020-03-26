@@ -99,7 +99,6 @@ class FairseqRNNClassifier(BaseFairseqModel):
             last_hidden=last_hidden,
             input_vocab=task.source_dictionary,
         )
-
     def __init__(self, rnn, input_vocab,last_hidden,**kwargs):
         super(FairseqRNNClassifier, self).__init__()
         self.softmax = nn.LogSoftmax(dim=1)

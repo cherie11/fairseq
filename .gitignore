@@ -20,6 +20,8 @@ develop-eggs/
 dist/
 downloads/
 eggs/
+checkpoints/
+checkpoints_lstm/
 .eggs/
 lib/
 lib64/
